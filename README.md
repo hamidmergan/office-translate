@@ -20,7 +20,7 @@ If you run your own model, your documents stay on your own network. Nothing leav
 ## Installation
 
 ```bash
-pip install git+https://github.com/hamidmergan/office-translate.git
+pip install office-translate
 ```
 
 Alternatively, you can install it from the source:

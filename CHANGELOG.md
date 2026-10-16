@@ -28,3 +28,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Retry of incomplete or cut off model replies
 - Command-line tool and Python API
 - Works with any OpenAI-compatible server, with or without an API key
+
+[Unreleased]: https://github.com/hamidmergan/office-translate/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/hamidmergan/office-translate/releases/tag/v0.2.0
