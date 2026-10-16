@@ -5,25 +5,35 @@ import pytest
 from office_translate import Glossary, GlossaryError, load_glossary
 
 
-def test_protect_and_restore():
+def test_protect_keeps_terms_with_target():
     g = Glossary({"machine learning": "maschinelles Lernen", "machine": "Maschine"})
-    text, used = g.protect("Machine learning needs a machine.")
+    text, tokens, found = g.protect("Machine learning needs a machine. Machine learning again.")
+    assert text == "Machine learning needs a machine. Machine learning again."
+    assert tokens == []
+    assert found == [0, 1]
+
+
+def test_strict_protect_and_restore():
+    g = Glossary({"machine learning": "maschinelles Lernen", "machine": "Maschine"})
+    text, tokens, found = g.protect("Machine learning needs a machine.", strict=True)
     assert "machine" not in text.lower()
-    assert len(used) == 2
+    assert len(tokens) == 2
+    assert found == []
     assert g.restore(text) == "maschinelles Lernen needs a Maschine."
 
 
 def test_word_boundaries():
     g = Glossary({"cat": "Katze"})
-    text, used = g.protect("The category of the cat")
+    text, tokens, _ = g.protect("The category of the cat", strict=True)
     assert text == "The category of the __GLOSSARY_0__"
-    assert used == [0]
+    assert tokens == [0]
+    assert g.protect("The category")[2] == []
 
 
 def test_case_sensitive():
     g = Glossary({"Apple": "Apfel"}, case_sensitive=True)
-    assert g.protect("apple")[1] == []
-    assert g.protect("Apple")[1] == [0]
+    assert g.protect("apple")[2] == []
+    assert g.protect("Apple")[2] == [0]
 
 
 def test_restore_damaged_token():
@@ -33,7 +43,10 @@ def test_restore_damaged_token():
 
 def test_empty_target_keeps_source():
     g = Glossary({"Kubernetes": ""})
-    text, _ = g.protect("Run Kubernetes")
+    text, tokens, found = g.protect("Run Kubernetes")
+    assert text == "Run __GLOSSARY_0__"
+    assert tokens == [0]
+    assert found == []
     assert g.restore(text) == "Run Kubernetes"
 
 
@@ -41,6 +54,23 @@ def test_describe():
     g = Glossary({"invoice": "Rechnung"})
     assert "__GLOSSARY_0__" in g.describe([0])
     assert "Rechnung" in g.describe([0])
+
+
+def test_describe_terms():
+    g = Glossary({"invoice": "Rechnung", "machine learning": "maschinelles Lernen"})
+    lines = g.describe_terms([1, 0]).splitlines()
+    assert sorted(lines) == ["'invoice' -> 'Rechnung'", "'machine learning' -> 'maschinelles Lernen'"]
+
+
+def test_missing_allows_inflection_and_compounds():
+    g = Glossary({"invoice": "Rechnung", "machine learning": "maschinelles Lernen", "tax": "Steuer"})
+    i = {source: n for n, (source, _) in enumerate(g.terms)}
+    assert g.missing("Die Grundlagen des maschinellen Lernens", [i["machine learning"]]) == []
+    assert g.missing("Der Rechnungsprozess ist neu", [i["invoice"]]) == []
+    assert g.missing("Alle Rechnungen sind da", [i["invoice"]]) == []
+    assert g.missing("Die Steuern steigen", [i["tax"]]) == []
+    assert g.missing("Die Faktura ist da", [i["invoice"]]) == [i["invoice"]]
+    assert g.missing("Lernen ohne Maschine", [i["machine learning"]]) == [i["machine learning"]]
 
 
 def test_load_csv_with_header(tmp_path):

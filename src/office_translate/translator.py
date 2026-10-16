@@ -1,8 +1,10 @@
 """Sends text segments to an OpenAI-compatible model in batches."""
 
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from functools import partial
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from openai import OpenAI, OpenAIError
@@ -15,6 +17,11 @@ _ITEM = re.compile(r'<s id="?(\d+)"?>(.*?)</s>', re.DOTALL)
 _STRAY = re.compile(r'</?s(?:\s+id="?\d+"?)?>')
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _LETTER = re.compile(r"[^\W\d_]")
+
+log = logging.getLogger(__name__)
+
+# Text, token indexes, indexes of required glossary translations.
+Item = Tuple[str, List[int], List[int]]
 
 
 def make_client(settings: config.Settings) -> OpenAI:
@@ -52,6 +59,7 @@ class Translator:
         api_key: Optional[str] = None,
         client: Optional[OpenAI] = None,
         case_sensitive: bool = False,
+        strict_glossary: bool = False,
         **limits,
     ):
         if not target_lang or not target_lang.strip():
@@ -62,6 +70,7 @@ class Translator:
         self.settings = config.resolve(base_url=base_url, model=model, api_key=api_key, **limits)
         self.client = client or make_client(self.settings)
         self.glossary = load_glossary(glossary, case_sensitive)
+        self.strict_glossary = strict_glossary
 
     def translate_file(self, path: Union[str, Path], output: Union[str, Path, None] = None) -> Path:
         """Translate a file and return the path of the written copy."""
@@ -91,31 +100,54 @@ class Translator:
         return results
 
     def _translate_unique(self, cores: List[str]) -> List[str]:
-        items = []
+        items: List[Item] = []
         for core in cores:
             if self.glossary is not None:
-                items.append(self.glossary.protect(core))
+                items.append(self.glossary.protect(core, self.strict_glossary))
             else:
-                items.append((core, []))
+                items.append((core, [], []))
 
-        chunks = self._chunks(items)
-        with ThreadPoolExecutor(max_workers=self.settings.concurrency) as pool:
-            done = list(pool.map(self._run_chunk, chunks))
-
-        out: List[str] = []
-        for chunk_result in done:
-            out.extend(chunk_result)
+        out = self._run_all(items)
+        if self.glossary is not None:
+            self._check_glossary(cores, items, out)
         final = []
         for core, new in zip(cores, out):
-            if self.glossary is not None:
-                new = self.glossary.restore(new)
             new = new.strip()
             final.append(new if new else core)
         return final
 
-    def _chunks(self, items: List[Tuple[str, List[int]]]) -> List[List[Tuple[str, List[int]]]]:
-        chunks: List[List[Tuple[str, List[int]]]] = []
-        current: List[Tuple[str, List[int]]] = []
+    def _run_all(self, items: List[Item], reminder: bool = False) -> List[str]:
+        chunks = self._chunks(items)
+        with ThreadPoolExecutor(max_workers=self.settings.concurrency) as pool:
+            done = list(pool.map(partial(self._run_chunk, reminder=reminder), chunks))
+        out: List[str] = []
+        for chunk_result in done:
+            out.extend(chunk_result)
+        if self.glossary is not None:
+            out = [self.glossary.restore(new) for new in out]
+        return out
+
+    def _check_glossary(self, cores: List[str], items: List[Item], out: List[str]) -> None:
+        """Translate segments again once if a required glossary term is missing."""
+        missing = {i: self.glossary.missing(out[i], item[2]) for i, item in enumerate(items) if item[2]}
+        retry = [i for i, terms in missing.items() if terms]
+        if not retry:
+            return
+        again = self._run_all([items[i] for i in retry], reminder=True)
+        for i, new in zip(retry, again):
+            still = self.glossary.missing(new, items[i][2])
+            if new.strip() and len(still) < len(missing[i]):
+                out[i] = new
+            else:
+                still = missing[i]
+            for index in still:
+                source, target = self.glossary.terms[index]
+                text = cores[i] if len(cores[i]) <= 60 else cores[i][:57] + "..."
+                log.warning("Glossary term '%s' -> '%s' not used in the translation of: %s", source, target, text)
+
+    def _chunks(self, items: List[Item]) -> List[List[Item]]:
+        chunks: List[List[Item]] = []
+        current: List[Item] = []
         size = 0
         for item in items:
             length = len(item[0])
@@ -128,8 +160,8 @@ class Translator:
             chunks.append(current)
         return chunks
 
-    def _run_chunk(self, chunk: List[Tuple[str, List[int]]]) -> List[str]:
-        content, cut = self._ask(chunk)
+    def _run_chunk(self, chunk: List[Item], reminder: bool = False) -> List[str]:
+        content, cut = self._ask(chunk, reminder)
         if cut:
             if len(chunk) == 1:
                 raise ModelError(
@@ -137,7 +169,7 @@ class Translator:
                     "or split the text into smaller parts."
                 )
             half = len(chunk) // 2
-            return self._run_chunk(chunk[:half]) + self._run_chunk(chunk[half:])
+            return self._run_chunk(chunk[:half], reminder) + self._run_chunk(chunk[half:], reminder)
 
         found = {int(m.group(1)): m.group(2) for m in _ITEM.finditer(content)}
         if len(chunk) == 1 and 0 not in found:
@@ -148,16 +180,18 @@ class Translator:
             if i in found:
                 result.append(found[i])
             else:
-                result.append(self._run_chunk([item])[0])
+                result.append(self._run_chunk([item], reminder)[0])
         return result
 
-    def _ask(self, chunk: List[Tuple[str, List[int]]]) -> Tuple[str, bool]:
-        used: List[int] = []
-        for _, indexes in chunk:
-            used.extend(indexes)
-        user = "\n".join(f'<s id="{i}">{text}</s>' for i, (text, _) in enumerate(chunk))
+    def _ask(self, chunk: List[Item], reminder: bool = False) -> Tuple[str, bool]:
+        tokens: List[int] = []
+        terms: List[int] = []
+        for _, item_tokens, item_terms in chunk:
+            tokens.extend(item_tokens)
+            terms.extend(item_terms)
+        user = "\n".join(f'<s id="{i}">{item[0]}</s>' for i, item in enumerate(chunk))
         messages = [
-            {"role": "system", "content": self._system_prompt(used)},
+            {"role": "system", "content": self._system_prompt(tokens, terms, reminder)},
             {"role": "user", "content": user},
         ]
         try:
@@ -176,7 +210,7 @@ class Translator:
             raise ModelError("The server response has an unexpected format.")
         return _THINK.sub("", content), cut
 
-    def _system_prompt(self, used: List[int]) -> str:
+    def _system_prompt(self, tokens: List[int], terms: List[int], reminder: bool = False) -> str:
         source = self.source_lang or "the detected source language"
         lines = [
             f"You are a professional translator. Translate each segment from {source} into {self.target_lang}.",
@@ -187,9 +221,17 @@ class Translator:
             "Keep URLs, e-mail addresses, numbers, code and Markdown syntax unchanged.",
             "If a segment is already in the target language, return it unchanged.",
         ]
-        if used and self.glossary is not None:
+        if terms and self.glossary is not None:
+            lines.append(
+                "Translate these glossary terms exactly as given. Inflect them and form compounds "
+                f"as the grammar of {self.target_lang} requires, but keep the given words:"
+            )
+            lines.append(self.glossary.describe_terms(terms))
+            if reminder:
+                lines.append("An earlier translation did not use these glossary terms. Make sure to use them.")
+        if tokens and self.glossary is not None:
             lines.append("Keep tokens like __GLOSSARY_0__ exactly as they are. They are glossary terms:")
-            lines.append(self.glossary.describe(used))
+            lines.append(self.glossary.describe(tokens))
         if self.instructions:
             lines.append("Additional instructions: " + self.instructions)
         return "\n".join(lines)

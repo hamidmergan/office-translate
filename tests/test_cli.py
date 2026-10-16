@@ -64,8 +64,20 @@ def test_glossary_flag(tmp_path, server):
     src.write_text("the invoice", encoding="utf-8")
     gl = tmp_path / "terms.csv"
     gl.write_text("invoice,Rechnung\n", encoding="utf-8")
+    server.replace = {"invoice": "Rechnung"}
     assert main(args(server, str(src), "--to", "de", "--glossary", str(gl))) == 0
     assert (tmp_path / "a.de.txt").read_text(encoding="utf-8") == "THE Rechnung"
+    assert "'invoice' -> 'Rechnung'" in server.system_messages()[0]
+
+
+def test_strict_glossary_flag(tmp_path, server):
+    src = tmp_path / "a.txt"
+    src.write_text("the invoice", encoding="utf-8")
+    gl = tmp_path / "terms.csv"
+    gl.write_text("invoice,Rechnung\n", encoding="utf-8")
+    assert main(args(server, str(src), "--to", "de", "--glossary", str(gl), "--strict-glossary")) == 0
+    assert (tmp_path / "a.de.txt").read_text(encoding="utf-8") == "THE Rechnung"
+    assert "__GLOSSARY_0__" in server.user_messages()[0]
 
 
 def test_missing_config(tmp_path, capsys):

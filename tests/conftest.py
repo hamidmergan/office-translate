@@ -19,6 +19,9 @@ class FakeServer:
     def __init__(self):
         self.requests = []
         self.mode = None
+        # Words to swap in replies from request number replace_from on, e.g. {"invoice": "Rechnungen"}.
+        self.replace = {}
+        self.replace_from = 0
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -44,6 +47,9 @@ class FakeServer:
                 parts = []
                 for number, text in items:
                     new = fake_translate(text)
+                    if len(outer.requests) > outer.replace_from:
+                        for old, word in outer.replace.items():
+                            new = re.sub(re.escape(old), word, new, flags=re.IGNORECASE)
                     if outer.mode == "drop_tags":
                         new = re.sub(r"</?g\d+>", "", new)
                     parts.append(f'<s id="{number}">{new}</s>')

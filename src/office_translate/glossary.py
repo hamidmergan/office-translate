@@ -1,6 +1,8 @@
 """Glossary: fixed translations for terms.
 
-Terms are replaced by tokens before translation and restored afterwards.
+Terms with a target are given to the model as required translations, so it
+can inflect them or build compounds. Terms with an empty target, or all terms
+in strict mode, are replaced by tokens and restored after translation.
 """
 
 import csv
@@ -28,7 +30,7 @@ class Glossary:
             target = str(target).strip() if target is not None else ""
             if not source:
                 continue
-            clean[source] = target or source
+            clean[source] = target
         # Longest first, so "machine learning" wins over "machine".
         self.terms: List[Tuple[str, str]] = sorted(clean.items(), key=lambda p: (-len(p[0]), p[0]))
         self.case_sensitive = case_sensitive
@@ -51,19 +53,33 @@ class Glossary:
         flags = 0 if self.case_sensitive else re.IGNORECASE
         return re.compile("|".join(parts), flags)
 
-    def protect(self, text: str) -> Tuple[str, List[int]]:
-        """Replace terms with tokens. Returns the new text and the used indexes."""
+    def target(self, index: int) -> str:
+        """Target term, or the source term if it stays unchanged."""
+        source, target = self.terms[index]
+        return target or source
+
+    def protect(self, text: str, strict: bool = False) -> Tuple[str, List[int], List[int]]:
+        """Prepare text for translation.
+
+        Terms that stay unchanged (or all terms if strict) are replaced with tokens.
+        Returns the new text, the token indexes and the indexes of the other found terms.
+        """
         if self._pattern is None:
-            return text, []
-        used: List[int] = []
+            return text, [], []
+        tokens: List[int] = []
+        found: List[int] = []
 
         def repl(match: "re.Match") -> str:
             index = int(match.lastgroup[1:])
-            if index not in used:
-                used.append(index)
-            return TOKEN.format(index)
+            if strict or not self.terms[index][1]:
+                if index not in tokens:
+                    tokens.append(index)
+                return TOKEN.format(index)
+            if index not in found:
+                found.append(index)
+            return match.group(0)
 
-        return self._pattern.sub(repl, text), used
+        return self._pattern.sub(repl, text), tokens, found
 
     def restore(self, text: str) -> str:
         """Replace tokens with the target terms."""
@@ -73,7 +89,7 @@ class Glossary:
         def repl(match: "re.Match") -> str:
             index = int(match.group(1))
             if index < len(self.terms):
-                return self.terms[index][1]
+                return self.target(index)
             return match.group(0)
 
         return _RESTORE.sub(repl, text)
@@ -82,9 +98,35 @@ class Glossary:
         """Prompt lines for the tokens used in a request."""
         lines = []
         for i in sorted(set(indexes)):
-            source, target = self.terms[i]
-            lines.append(f"{TOKEN.format(i)} stands for '{source}' and will be replaced with '{target}'.")
+            source = self.terms[i][0]
+            lines.append(f"{TOKEN.format(i)} stands for '{source}' and will be replaced with '{self.target(i)}'.")
         return "\n".join(lines)
+
+    def describe_terms(self, indexes: Iterable[int]) -> str:
+        """Prompt lines for the required translations used in a request."""
+        return "\n".join(f"'{self.terms[i][0]}' -> '{self.terms[i][1]}'" for i in sorted(set(indexes)))
+
+    def missing(self, text: str, indexes: Iterable[int]) -> List[int]:
+        """Indexes of terms whose target does not appear in the text.
+
+        The check is lenient. Each word of the target only has to appear with its
+        last letters cut off, so inflected forms and compounds count as found.
+        """
+        haystack = text.casefold()
+        result = []
+        for i in indexes:
+            words = self.terms[i][1].casefold().split()
+            if not all(_stem(word) in haystack for word in words):
+                result.append(i)
+        return result
+
+
+def _stem(word: str) -> str:
+    if len(word) >= 6:
+        return word[:-2]
+    if len(word) == 5:
+        return word[:-1]
+    return word
 
 
 def load_glossary(source: Union[str, Path, Dict[str, str], "Glossary", None], case_sensitive: bool = False) -> Optional[Glossary]:

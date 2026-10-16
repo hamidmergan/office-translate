@@ -19,6 +19,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--from", dest="source", help="Source language. Default: detected by the model")
     p.add_argument("--glossary", help="Glossary file (.csv, .tsv or .json) with source and target terms")
     p.add_argument("--case-sensitive", action="store_true", help="Match glossary terms case-sensitively")
+    p.add_argument(
+        "--strict-glossary",
+        action="store_true",
+        help="Replace all glossary terms with placeholders. Exact terms, but no inflection",
+    )
     p.add_argument("--instructions", help="Extra instructions for the model, e.g. tone or audience")
     p.add_argument(
         "-o",
@@ -75,6 +80,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             model=args.model,
             api_key=args.api_key,
             case_sensitive=args.case_sensitive,
+            strict_glossary=args.strict_glossary,
             max_file_mb=args.max_file_mb,
             batch_size=args.batch_size,
             concurrency=args.concurrency,

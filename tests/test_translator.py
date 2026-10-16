@@ -66,11 +66,47 @@ def test_prompt_languages_and_instructions(server, opts):
     assert "Use a formal tone." in system
 
 
-def test_glossary(server, opts):
+def test_glossary_in_prompt(server, opts):
+    server.replace = {"invoice": "Rechnungen"}
     t = make(opts, glossary={"invoice": "Rechnung"})
+    assert t.translate(["Send the invoice today"]) == ["SEND THE Rechnungen TODAY"]
+    assert "invoice" in server.user_messages()[0]
+    assert "'invoice' -> 'Rechnung'" in server.system_messages()[0]
+    assert "Inflect" in server.system_messages()[0]
+    assert len(server.requests) == 1
+
+
+def test_glossary_retry_then_success(server, opts, caplog):
+    server.replace = {"invoice": "Rechnung"}
+    server.replace_from = 1
+    t = make(opts, glossary={"invoice": "Rechnung"})
+    assert t.translate(["Send the invoice today", "hello"]) == ["SEND THE Rechnung TODAY", "HELLO"]
+    assert len(server.requests) == 2
+    assert "did not use" in server.system_messages()[1]
+    assert "HELLO" not in server.user_messages()[1].upper()
+    assert "not used" not in caplog.text
+
+
+def test_glossary_warning_when_missing(server, opts, caplog):
+    t = make(opts, glossary={"invoice": "Rechnung"})
+    assert t.translate(["Send the invoice today"]) == ["SEND THE INVOICE TODAY"]
+    assert len(server.requests) == 2
+    assert "'invoice' -> 'Rechnung' not used" in caplog.text
+
+
+def test_strict_glossary(server, opts):
+    t = make(opts, glossary={"invoice": "Rechnung"}, strict_glossary=True)
     assert t.translate(["Send the invoice today"]) == ["SEND THE Rechnung TODAY"]
     assert "__GLOSSARY_0__" in server.user_messages()[0]
     assert "Rechnung" in server.system_messages()[0]
+    assert len(server.requests) == 1
+
+
+def test_glossary_empty_target_uses_token(server, opts):
+    t = make(opts, glossary={"Acme Cloud": ""})
+    assert t.translate(["Open Acme Cloud now"]) == ["OPEN Acme Cloud NOW"]
+    assert "__GLOSSARY_0__" in server.user_messages()[0]
+    assert len(server.requests) == 1
 
 
 def test_no_glossary_lines_without_match(server, opts):

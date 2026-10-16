@@ -113,7 +113,11 @@ Acme Cloud,
 - An empty target keeps the term unchanged, which is useful for product names
 - Matching ignores case and only matches whole words. Use `--case-sensitive` to match exact case
 
-Glossary terms are replaced by placeholders before the text is sent, so the model cannot change them.
+The model gets the glossary terms as required translations. It may inflect them and build compounds, so "maschinelles Lernen" can become "des maschinellen Lernens" and "Rechnung" can become "Rechnungsprozess". Terms with an empty target are replaced by placeholders, so the model cannot change them.
+
+After translation, each paragraph is checked for its glossary terms. If a term is missing, the paragraph is translated once more with a reminder. If it is still missing, a warning is printed.
+
+Use `--strict-glossary` (`strict_glossary=True` in Python) to replace all terms with placeholders. The terms then appear exactly as written, but they are not inflected.
 
 ### Settings
 
