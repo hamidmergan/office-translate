@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "office-translate"
+version = "0.1.0"
+description = "Translate DOCX, PPTX and Markdown files with any OpenAI-compatible model while keeping the formatting, with glossary support"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Hamid Mergan" }]
+keywords = ["translation", "docx", "pptx", "markdown", "glossary", "llm", "ollama", "openai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Office Suites",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
+dependencies = [
+    "openai>=1.0",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "python-docx>=1.0", "python-pptx>=0.6.23"]
+dev = ["pytest>=7", "python-docx>=1.0", "python-pptx>=0.6.23", "build", "twine"]
+
+[project.scripts]
+office-translate = "office_translate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+office_translate = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
