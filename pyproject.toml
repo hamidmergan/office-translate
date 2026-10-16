@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "office-translate"
-version = "0.1.0"
+version = "0.2.0"
 description = "Translate DOCX, PPTX and Markdown files with any OpenAI-compatible model while keeping the formatting, with glossary support"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -35,6 +35,12 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=7", "python-docx>=1.0", "python-pptx>=0.6.23"]
 dev = ["pytest>=7", "python-docx>=1.0", "python-pptx>=0.6.23", "build", "twine"]
+
+[project.urls]
+Homepage = "https://github.com/hamidmergan/office-translate"
+Source = "https://github.com/hamidmergan/office-translate"
+Issues = "https://github.com/hamidmergan/office-translate/issues"
+Changelog = "https://github.com/hamidmergan/office-translate/blob/main/CHANGELOG.md"
 
 [project.scripts]
 office-translate = "office_translate.cli:main"

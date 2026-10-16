@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-17
+
 ### Changed
 
 - Glossary terms with a target are no longer hidden behind placeholders. The model gets them as required translations and may inflect them or build compounds. Terms with an empty target still use placeholders
